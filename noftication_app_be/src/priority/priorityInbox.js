@@ -1,12 +1,31 @@
+const axios = require("axios");
+
 const {
   MinPriorityQueue,
 } = require("@datastructures-js/priority-queue");
 
-const notifications = require("./sampleData");
+
+
+// ===============================
+// API CONFIG
+// ===============================
+
+// REPLACE WITH ACTUAL API URL
+
+const API_URL =
+  "https://your-api-url.com/api/notifications";
+
+
+// REPLACE WITH ACTUAL TOKEN
+
+const TOKEN =
+  "YOUR_BEARER_TOKEN";
 
 
 
+// ===============================
 // PRIORITY WEIGHTS
+// ===============================
 
 const typeWeights = {
 
@@ -20,21 +39,21 @@ const typeWeights = {
 
 
 
+// ===============================
 // CALCULATE PRIORITY SCORE
+// ===============================
 
 function calculatePriority(notification) {
 
   const typeWeight =
-    typeWeights[notification.notificationType] || 0;
+    typeWeights[notification.Type] || 0;
 
-
-  // RECENCY SCORE
 
   const recencyScore =
-    new Date(notification.createdAt).getTime();
+    new Date(
+      notification.Timestamp
+    ).getTime();
 
-
-  // FINAL PRIORITY SCORE
 
   return (
     typeWeight * 10000000000000 +
@@ -45,14 +64,57 @@ function calculatePriority(notification) {
 
 
 
+// ===============================
+// FETCH NOTIFICATIONS FROM API
+// ===============================
+
+async function fetchNotifications() {
+
+  try {
+
+    console.log(
+      "\nFetching notifications from API...\n"
+    );
+
+
+    const response = await axios.get(
+      API_URL,
+      {
+        headers: {
+
+          Authorization:
+            `Bearer ${TOKEN}`,
+
+        },
+      }
+    );
+
+
+    return response.data.notifications;
+
+  } catch (error) {
+
+    console.log(
+      "API Fetch Error:",
+      error.message
+    );
+
+    return [];
+
+  }
+
+}
+
+
+
+// ===============================
 // GET TOP PRIORITY NOTIFICATIONS
+// ===============================
 
 function getTopPriorityNotifications(
   notifications,
   topN = 10
 ) {
-
-  // MIN HEAP
 
   const minHeap = new MinPriorityQueue(
     (item) => item.priority
@@ -61,22 +123,19 @@ function getTopPriorityNotifications(
 
   for (const notification of notifications) {
 
-    // SKIP READ NOTIFICATIONS
-
-    if (notification.isRead) continue;
-
-
-    // CALCULATE PRIORITY
-
     const priority =
       calculatePriority(notification);
 
 
-    // INSERT INTO HEAP
-
     minHeap.enqueue({
 
-      ...notification,
+      ID: notification.ID,
+
+      Type: notification.Type,
+
+      Message: notification.Message,
+
+      Timestamp: notification.Timestamp,
 
       priority,
 
@@ -97,8 +156,6 @@ function getTopPriorityNotifications(
   const result = [];
 
 
-  // EXTRACT FROM HEAP
-
   while (!minHeap.isEmpty()) {
 
     result.push(
@@ -107,8 +164,6 @@ function getTopPriorityNotifications(
 
   }
 
-
-  // SORT DESCENDING
 
   return result.sort(
 
@@ -120,16 +175,43 @@ function getTopPriorityNotifications(
 
 
 
-// EXECUTE FUNCTION
+// ===============================
+// MAIN FUNCTION
+// ===============================
 
-const topNotifications =
-  getTopPriorityNotifications(
-    notifications,
-    10
+async function main() {
+
+  // FETCH API DATA
+
+  const notifications =
+    await fetchNotifications();
+
+
+  console.log(
+    `Total Notifications Fetched: ${notifications.length}\n`
   );
 
 
+  // GET TOP 10
 
-console.log("\nTop Priority Notifications:\n");
+  const topNotifications =
+    getTopPriorityNotifications(
+      notifications,
+      10
+    );
 
-console.table(topNotifications);
+
+  console.log(
+    "\nTop Priority Notifications:\n"
+  );
+
+
+  console.table(topNotifications);
+
+}
+
+
+
+// RUN APPLICATION
+
+main();
