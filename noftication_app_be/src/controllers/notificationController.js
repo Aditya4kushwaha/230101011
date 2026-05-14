@@ -1,16 +1,40 @@
 const pool = require("../config/db");
 
+const redisClient = require("../config/redis");
 
 
-// GET ALL NOTIFICATIONS
+
+// GET ALL NOTIFICATIONS WITH REDIS CACHE
 
 exports.getNotifications = async (req, res) => {
 
   try {
 
-    const { page = 1, limit = 10 } = req.query;
+    const studentId = req.user.id;
+
+    const { page = 1, limit = 20 } = req.query;
 
     const offset = (page - 1) * limit;
+
+    const cacheKey = `notifications:${studentId}:page:${page}`;
+
+    
+    // CHECK REDIS CACHE
+
+    const cachedData = await redisClient.get(cacheKey);
+
+    if (cachedData) {
+
+      return res.status(200).json({
+        success: true,
+        source: "redis-cache",
+        data: JSON.parse(cachedData),
+      });
+
+    }
+
+
+    // FETCH FROM POSTGRESQL
 
     const result = await pool.query(
       `
@@ -26,11 +50,22 @@ exports.getNotifications = async (req, res) => {
       ORDER BY createdAt DESC
       LIMIT $2 OFFSET $3
       `,
-      [req.user.id, limit, offset]
+      [studentId, limit, offset]
     );
+
+
+    // STORE IN REDIS CACHE FOR 60 SECONDS
+
+    await redisClient.setEx(
+      cacheKey,
+      60,
+      JSON.stringify(result.rows)
+    );
+
 
     res.status(200).json({
       success: true,
+      source: "postgresql",
       count: result.rows.length,
       data: result.rows,
     });
@@ -102,6 +137,9 @@ exports.createNotification = async (req, res) => {
       notificationType
     } = req.body;
 
+
+    // INSERT NOTIFICATION
+
     const result = await pool.query(
       `
       INSERT INTO notifications
@@ -122,12 +160,23 @@ exports.createNotification = async (req, res) => {
       ]
     );
 
+
+    // CLEAR REDIS CACHE
+
+    const cacheKey = `notifications:${studentID}:page:1`;
+
+    await redisClient.del(cacheKey);
+
+
+    // REAL TIME SOCKET EVENT
+
     const io = req.app.get("io");
 
     io.to(studentID).emit(
       "new-notification",
       result.rows[0]
     );
+
 
     res.status(201).json({
       success: true,
@@ -156,7 +205,25 @@ exports.getUnreadNotifications = async (req, res) => {
 
     const studentId = req.user.id;
 
-    const limit = 20;
+    const cacheKey = `unread:${studentId}`;
+
+
+    // CHECK CACHE
+
+    const cachedData = await redisClient.get(cacheKey);
+
+    if (cachedData) {
+
+      return res.status(200).json({
+        success: true,
+        source: "redis-cache",
+        data: JSON.parse(cachedData),
+      });
+
+    }
+
+
+    // DATABASE QUERY
 
     const result = await pool.query(
       `
@@ -169,13 +236,24 @@ exports.getUnreadNotifications = async (req, res) => {
       WHERE studentID = $1
       AND isRead = false
       ORDER BY createdAt DESC
-      LIMIT $2
+      LIMIT 20
       `,
-      [studentId, limit]
+      [studentId]
     );
+
+
+    // STORE CACHE
+
+    await redisClient.setEx(
+      cacheKey,
+      60,
+      JSON.stringify(result.rows)
+    );
+
 
     res.status(200).json({
       success: true,
+      source: "postgresql",
       count: result.rows.length,
       data: result.rows,
     });
@@ -201,6 +279,9 @@ exports.markAsRead = async (req, res) => {
 
     const { id } = req.params;
 
+
+    // UPDATE DATABASE
+
     await pool.query(
       `
       UPDATE notifications
@@ -209,6 +290,16 @@ exports.markAsRead = async (req, res) => {
       `,
       [id]
     );
+
+
+    // CLEAR CACHE
+
+    const studentId = req.user.id;
+
+    await redisClient.del(`unread:${studentId}`);
+
+    await redisClient.del(`notifications:${studentId}:page:1`);
+
 
     res.status(200).json({
       success: true,
@@ -228,11 +319,16 @@ exports.markAsRead = async (req, res) => {
 
 
 
-// MARK ALL NOTIFICATIONS AS READ
+// MARK ALL AS READ
 
 exports.markAllAsRead = async (req, res) => {
 
   try {
+
+    const studentId = req.user.id;
+
+
+    // UPDATE DATABASE
 
     await pool.query(
       `
@@ -240,8 +336,16 @@ exports.markAllAsRead = async (req, res) => {
       SET isRead = TRUE
       WHERE studentID = $1
       `,
-      [req.user.id]
+      [studentId]
     );
+
+
+    // CLEAR CACHE
+
+    await redisClient.del(`unread:${studentId}`);
+
+    await redisClient.del(`notifications:${studentId}:page:1`);
+
 
     res.status(200).json({
       success: true,
@@ -269,6 +373,11 @@ exports.deleteNotification = async (req, res) => {
 
     const { id } = req.params;
 
+    const studentId = req.user.id;
+
+
+    // DELETE FROM DATABASE
+
     await pool.query(
       `
       DELETE FROM notifications
@@ -276,6 +385,14 @@ exports.deleteNotification = async (req, res) => {
       `,
       [id]
     );
+
+
+    // CLEAR CACHE
+
+    await redisClient.del(`notifications:${studentId}:page:1`);
+
+    await redisClient.del(`unread:${studentId}`);
+
 
     res.status(200).json({
       success: true,
@@ -295,7 +412,7 @@ exports.deleteNotification = async (req, res) => {
 
 
 
-// GET STUDENTS WHO RECEIVED PLACEMENT NOTIFICATIONS
+// GET STUDENTS WITH PLACEMENT NOTIFICATIONS
 
 exports.getPlacementStudents = async (req, res) => {
 
