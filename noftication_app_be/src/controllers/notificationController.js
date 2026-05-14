@@ -1,19 +1,29 @@
 const pool = require("../config/db");
 
 
+
 // GET ALL NOTIFICATIONS
+
 exports.getNotifications = async (req, res) => {
+
   try {
+
     const { page = 1, limit = 10 } = req.query;
 
     const offset = (page - 1) * limit;
 
     const result = await pool.query(
       `
-      SELECT *
+      SELECT id,
+             studentID,
+             title,
+             message,
+             notificationType,
+             isRead,
+             createdAt
       FROM notifications
-      WHERE user_id = $1
-      ORDER BY created_at DESC
+      WHERE studentID = $1
+      ORDER BY createdAt DESC
       LIMIT $2 OFFSET $3
       `,
       [req.user.id, limit, offset]
@@ -21,27 +31,40 @@ exports.getNotifications = async (req, res) => {
 
     res.status(200).json({
       success: true,
+      count: result.rows.length,
       data: result.rows,
     });
 
   } catch (error) {
+
     res.status(500).json({
       success: false,
       message: error.message,
     });
+
   }
+
 };
 
 
+
 // GET SINGLE NOTIFICATION
+
 exports.getSingleNotification = async (req, res) => {
+
   try {
 
     const { id } = req.params;
 
     const result = await pool.query(
       `
-      SELECT *
+      SELECT id,
+             studentID,
+             title,
+             message,
+             notificationType,
+             isRead,
+             createdAt
       FROM notifications
       WHERE id = $1
       `,
@@ -54,33 +77,57 @@ exports.getSingleNotification = async (req, res) => {
     });
 
   } catch (error) {
+
     res.status(500).json({
       success: false,
       message: error.message,
     });
+
   }
+
 };
 
 
+
 // CREATE NOTIFICATION
+
 exports.createNotification = async (req, res) => {
+
   try {
 
-    const { userId, title, message, type } = req.body;
+    const {
+      studentID,
+      title,
+      message,
+      notificationType
+    } = req.body;
 
     const result = await pool.query(
       `
       INSERT INTO notifications
-      (user_id, title, message, type)
+      (
+        studentID,
+        title,
+        message,
+        notificationType
+      )
       VALUES ($1, $2, $3, $4)
       RETURNING *
       `,
-      [userId, title, message, type]
+      [
+        studentID,
+        title,
+        message,
+        notificationType
+      ]
     );
 
     const io = req.app.get("io");
 
-    io.to(userId).emit("new-notification", result.rows[0]);
+    io.to(studentID).emit(
+      "new-notification",
+      result.rows[0]
+    );
 
     res.status(201).json({
       success: true,
@@ -89,16 +136,67 @@ exports.createNotification = async (req, res) => {
     });
 
   } catch (error) {
+
     res.status(500).json({
       success: false,
       message: error.message,
     });
+
   }
+
 };
 
 
-// MARK AS READ
+
+// GET UNREAD NOTIFICATIONS (OPTIMIZED)
+
+exports.getUnreadNotifications = async (req, res) => {
+
+  try {
+
+    const studentId = req.user.id;
+
+    const limit = 20;
+
+    const result = await pool.query(
+      `
+      SELECT id,
+             studentID,
+             title,
+             message,
+             createdAt
+      FROM notifications
+      WHERE studentID = $1
+      AND isRead = false
+      ORDER BY createdAt DESC
+      LIMIT $2
+      `,
+      [studentId, limit]
+    );
+
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows,
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+
+  }
+
+};
+
+
+
+// MARK SINGLE NOTIFICATION AS READ
+
 exports.markAsRead = async (req, res) => {
+
   try {
 
     const { id } = req.params;
@@ -106,7 +204,7 @@ exports.markAsRead = async (req, res) => {
     await pool.query(
       `
       UPDATE notifications
-      SET is_read = TRUE
+      SET isRead = TRUE
       WHERE id = $1
       `,
       [id]
@@ -118,23 +216,29 @@ exports.markAsRead = async (req, res) => {
     });
 
   } catch (error) {
+
     res.status(500).json({
       success: false,
       message: error.message,
     });
+
   }
+
 };
 
 
-// MARK ALL AS READ
+
+// MARK ALL NOTIFICATIONS AS READ
+
 exports.markAllAsRead = async (req, res) => {
+
   try {
 
     await pool.query(
       `
       UPDATE notifications
-      SET is_read = TRUE
-      WHERE user_id = $1
+      SET isRead = TRUE
+      WHERE studentID = $1
       `,
       [req.user.id]
     );
@@ -145,16 +249,22 @@ exports.markAllAsRead = async (req, res) => {
     });
 
   } catch (error) {
+
     res.status(500).json({
       success: false,
       message: error.message,
     });
+
   }
+
 };
 
 
+
 // DELETE NOTIFICATION
+
 exports.deleteNotification = async (req, res) => {
+
   try {
 
     const { id } = req.params;
@@ -173,9 +283,46 @@ exports.deleteNotification = async (req, res) => {
     });
 
   } catch (error) {
+
     res.status(500).json({
       success: false,
       message: error.message,
     });
+
   }
+
+};
+
+
+
+// GET STUDENTS WHO RECEIVED PLACEMENT NOTIFICATIONS
+
+exports.getPlacementStudents = async (req, res) => {
+
+  try {
+
+    const result = await pool.query(
+      `
+      SELECT DISTINCT studentID
+      FROM notifications
+      WHERE notificationType = 'Placement'
+      AND createdAt >= NOW() - INTERVAL '7 days'
+      `
+    );
+
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows,
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+
+  }
+
 };
