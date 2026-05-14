@@ -13,6 +13,7 @@ const {
   deleteNotification,
 } = require("../controllers/notificationController");
 
+
 router.get("/", authMiddleware, getNotifications);
 
 router.get("/:id", authMiddleware, getSingleNotification);
@@ -25,5 +26,5 @@ router.patch("/read-all", authMiddleware, markAllAsRead);
 
 router.delete("/:id", authMiddleware, deleteNotification);
 
-module.exports = router;
 
+module.exports = router;
